@@ -4,7 +4,6 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-import org.hibernate.annotations.Generated;
 
 import java.time.OffsetDateTime;
 
@@ -21,6 +20,8 @@ public class User {
     private String username;
     @Column(unique = true, nullable = false,length = 255)
     private String email;
+    @Column(name = "is_active", nullable = false)
+    private boolean isActive = true;
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 

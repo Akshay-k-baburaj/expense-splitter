@@ -38,4 +38,13 @@ public class UserService {
         User savedUser = userRepository.save(existingUser);
         return userMapper.toResponse(savedUser);
     }
+
+    @Transactional
+    public void deactivateAccount(Long id) {
+        User user = userRepository.findById(id).orElseThrow(() -> new AccountNotFoundException("User not found with id : " + id));
+        user.setActive(false);
+        user.setEmail("archived_"+ id + "_" + user.getEmail());
+        user.setUsername("archived_"+ id + "_" + user.getUsername());
+        userRepository.save(user);
+    }
 }

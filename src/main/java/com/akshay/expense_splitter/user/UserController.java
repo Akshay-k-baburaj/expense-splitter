@@ -31,4 +31,10 @@ public class UserController {
         UserResponse updatedUser = userService.updateAccountById(id,userRequest);
         return ResponseEntity.status(HttpStatus.OK).body(updatedUser);
     }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deactivateAccount(@PathVariable Long id){
+        userService.deactivateAccount(id);
+        return ResponseEntity.noContent().build();
+    }
 }
