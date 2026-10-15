@@ -1,11 +1,11 @@
 package com.akshay.expense_splitter.group;
 
+import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/groups")
@@ -21,4 +21,23 @@ public class GroupController {
         GroupResponse createdGroup = groupService.createGroup(groupRequest);
         return ResponseEntity.status(HttpStatus.CREATED).body(createdGroup);
     }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<GroupResponse> getGroupById(@PathVariable Long id){
+        GroupResponse group = groupService.getGroupById(id);
+        return ResponseEntity.status(HttpStatus.OK).body(group);
+    }
+
+    @GetMapping("/users/{userId}")
+    public ResponseEntity<List<GroupResponse>> getAllGroupsForUser(@PathVariable Long userId){
+        List<GroupResponse> groupResponses = groupService.getAllGroupForUser(userId);
+        return ResponseEntity.ok(groupResponses);
+    }
+
+    @PostMapping("/{groupId}/members")
+    public ResponseEntity<GroupMemberResponse> addMemberToGroup(@PathVariable Long groupId, @Valid @RequestBody AddMemberRequest request){
+        GroupMemberResponse response = groupService.addMemberToGroup(groupId,request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
 }

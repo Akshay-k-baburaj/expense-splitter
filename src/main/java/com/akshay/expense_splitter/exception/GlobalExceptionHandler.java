@@ -35,4 +35,29 @@ public class GlobalExceptionHandler {
             );
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
     }
+
+    @ExceptionHandler(GroupNotFoundException.class)
+    public ResponseEntity<ErrorResponse> groupNotFoundException(GroupNotFoundException ex){
+        ErrorResponse errorResponse = new ErrorResponse(
+                OffsetDateTime.now(),
+                HttpStatus.NOT_FOUND.value(),
+                "Not Found",
+                ex.getMessage()
+        );
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(errorResponse);
+    }
+
+    @ExceptionHandler(DuplicateMembershipException.class)
+    public ResponseEntity<ErrorResponse> duplicateMembershipFound(DuplicateMembershipException ex){
+        ErrorResponse errorResponse = new ErrorResponse(
+                OffsetDateTime.now(),
+                HttpStatus.CONFLICT.value(),
+                "Joining already joined group",
+                ex.getMessage()
+
+        );
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(errorResponse);
+    }
+
+
 }

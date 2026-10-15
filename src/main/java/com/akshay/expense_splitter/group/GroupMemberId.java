@@ -16,4 +16,9 @@ import java.io.Serializable;
 public class GroupMemberId implements Serializable {
     private Long groupId;
     private Long userId;
+
+    public GroupMemberId(Long groupId, Long userId) {
+        this.groupId = groupId;
+        this.userId = userId;
+    }
 }
