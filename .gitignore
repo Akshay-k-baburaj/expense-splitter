@@ -31,3 +31,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+PROJECT_CONTEXT.md
+AGENTS.md
