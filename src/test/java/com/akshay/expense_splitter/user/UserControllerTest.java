@@ -1,190 +1,51 @@
 package com.akshay.expense_splitter.user;
 
-import com.akshay.expense_splitter.exception.AccountNotFoundException;
-import com.akshay.expense_splitter.exception.GlobalExceptionHandler;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.security.oauth2.jwt.Jwt;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.*;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class UserControllerTest {
+    @Mock UserService userService;
+    @InjectMocks UserController userController;
+    private final Jwt principal = Jwt.withTokenValue("signed-token").header("alg", "none").subject("auth0|user").build();
 
-    private MockMvc mockMvc;
+    @Test
+    void getMeReturnsOnlyAuthenticatedProfile() {
+        UserResponse response = new UserResponse(4L, "akshay", "akshay@example.com");
+        when(userService.getCurrentUser(principal)).thenReturn(response);
 
-    @Mock
-    private UserService userService;
+        var result = userController.getCurrentUser(principal);
 
-    @InjectMocks
-    private UserController userController;
-
-    @BeforeEach
-    void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(userController)
-                .setControllerAdvice(new GlobalExceptionHandler())
-                .build();
+        assertEquals(200, result.getStatusCode().value());
+        assertEquals(4L, result.getBody().getId());
+        verify(userService).getCurrentUser(principal);
     }
 
     @Test
-    void createUserAccount_Success() throws Exception {
-        UserResponse response = new UserResponse("akshay", "akshay@example.com");
-        when(userService.createUserAccount(any(UserRequest.class))).thenReturn(response);
+    void createProfilePassesAuthenticatedPrincipal() {
+        CreateUserProfileRequest request = new CreateUserProfileRequest("akshay");
+        UserResponse response = new UserResponse(4L, "akshay", "akshay@example.com");
+        when(userService.createCurrentUser(principal, request)).thenReturn(response);
 
-        String json = """
-                {
-                    "username": "akshay",
-                    "email": "akshay@example.com"
-                }
-                """;
+        var result = userController.createCurrentUser(principal, request);
 
-        mockMvc.perform(post("/api/v1/users")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.username").value("akshay"))
-                .andExpect(jsonPath("$.email").value("akshay@example.com"));
+        assertEquals(201, result.getStatusCode().value());
+        verify(userService).createCurrentUser(principal, request);
     }
 
     @Test
-    void createUserAccount_ValidationFailure_BlankUsername() throws Exception {
-        String json = """
-                {
-                    "username": "",
-                    "email": "akshay@example.com"
-                }
-                """;
+    void deactivationReturnsNoContent() {
+        var result = userController.deactivateCurrentUser(principal);
 
-        mockMvc.perform(post("/api/v1/users")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.username").exists());
-
-        verify(userService, never()).createUserAccount(any());
-    }
-
-    @Test
-    void createUserAccount_ValidationFailure_InvalidEmail() throws Exception {
-        String json = """
-                {
-                    "username": "akshay",
-                    "email": "invalid-email"
-                }
-                """;
-
-        mockMvc.perform(post("/api/v1/users")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.email").exists());
-
-        verify(userService, never()).createUserAccount(any());
-    }
-
-    @Test
-    void getAccountById_Success() throws Exception {
-        UserResponse response = new UserResponse("akshay", "akshay@example.com");
-        when(userService.getUserById(1L)).thenReturn(response);
-
-        mockMvc.perform(get("/api/v1/users/1"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.username").value("akshay"))
-                .andExpect(jsonPath("$.email").value("akshay@example.com"));
-    }
-
-    @Test
-    void getAccountById_NotFound() throws Exception {
-        when(userService.getUserById(99L)).thenThrow(new AccountNotFoundException("User not found with id : 99"));
-
-        mockMvc.perform(get("/api/v1/users/99"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.message").value("User not found with id : 99"));
-    }
-
-    @Test
-    void updateAccountDetails_Success() throws Exception {
-        UserResponse response = new UserResponse("updatedUser", "updated@example.com");
-        when(userService.updateAccountById(eq(1L), any(UserRequest.class))).thenReturn(response);
-
-        String json = """
-                {
-                    "username": "updatedUser",
-                    "email": "updated@example.com"
-                }
-                """;
-
-        mockMvc.perform(put("/api/v1/users/1")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.username").value("updatedUser"))
-                .andExpect(jsonPath("$.email").value("updated@example.com"));
-    }
-
-    @Test
-    void updateAccountDetails_ValidationFailure() throws Exception {
-        String json = """
-                {
-                    "username": "updatedUser",
-                    "email": "not-an-email"
-                }
-                """;
-
-        mockMvc.perform(put("/api/v1/users/1")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.email").exists());
-
-        verify(userService, never()).updateAccountById(anyLong(), any());
-    }
-
-    @Test
-    void updateAccountDetails_NotFound() throws Exception {
-        when(userService.updateAccountById(eq(99L), any(UserRequest.class)))
-                .thenThrow(new AccountNotFoundException("User not found with id : 99"));
-
-        String json = """
-                {
-                    "username": "updatedUser",
-                    "email": "updated@example.com"
-                }
-                """;
-
-        mockMvc.perform(put("/api/v1/users/99")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.message").value("User not found with id : 99"));
-    }
-
-    @Test
-    void deactivateAccount_Success() throws Exception {
-        doNothing().when(userService).deactivateAccount(1L);
-
-        mockMvc.perform(delete("/api/v1/users/1"))
-                .andExpect(status().isNoContent());
-
-        verify(userService).deactivateAccount(1L);
-    }
-
-    @Test
-    void deactivateAccount_NotFound() throws Exception {
-        doThrow(new AccountNotFoundException("User not found with id : 99")).when(userService).deactivateAccount(99L);
-
-        mockMvc.perform(delete("/api/v1/users/99"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.message").value("User not found with id : 99"));
+        assertEquals(204, result.getStatusCode().value());
+        verify(userService).deactivateCurrentUser(principal);
     }
 }

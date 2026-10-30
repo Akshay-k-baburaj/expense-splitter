@@ -14,5 +14,7 @@ import java.time.OffsetDateTime;
 public class GroupMemberResponse {
     private Long groupId;
     private Long userId;
+    private String username;
     private OffsetDateTime joinedAt;
+    private boolean owner;
 }

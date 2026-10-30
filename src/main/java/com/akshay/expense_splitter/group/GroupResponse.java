@@ -13,4 +13,11 @@ public class GroupResponse {
     private Long id;
     private String groupName;
     private String description;
+    private String currencyCode;
+    private Long ownerId;
+    private boolean viewerIsOwner;
+
+    public GroupResponse(Long id, String groupName, String description, Long ownerId, boolean viewerIsOwner) {
+        this(id, groupName, description, "INR", ownerId, viewerIsOwner);
+    }
 }

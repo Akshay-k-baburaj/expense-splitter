@@ -1,280 +1,199 @@
 package com.akshay.expense_splitter.group;
 
-import com.akshay.expense_splitter.exception.AccountNotFoundException;
 import com.akshay.expense_splitter.exception.DuplicateMembershipException;
-import com.akshay.expense_splitter.exception.GroupNotFoundException;
-import com.akshay.expense_splitter.exception.MemberNotFoundException;
+import com.akshay.expense_splitter.exception.InvalidGroupInviteCodeException;
+import com.akshay.expense_splitter.expense.GroupFinancialService;
+import com.akshay.expense_splitter.expense.GroupBalanceResponse;
+import com.akshay.expense_splitter.expense.MemberBalanceResponse;
 import com.akshay.expense_splitter.user.User;
 import com.akshay.expense_splitter.user.UserRepository;
+import com.akshay.expense_splitter.user.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.oauth2.jwt.Jwt;
 
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class GroupServiceTest {
+    @Mock GroupRepository groupRepository;
+    @Mock GroupMemberRepository groupMemberRepository;
+    @Mock UserRepository userRepository;
+    @Mock UserService userService;
+    @Mock GroupMapper groupMapper;
+    @Mock GroupJoinAttemptRepository groupJoinAttemptRepository;
+    @Mock GroupFinancialService groupFinancialService;
+    @InjectMocks GroupService groupService;
 
-    @Mock
-    private GroupRepository groupRepository;
-
-    @Mock
-    private GroupMemberRepository groupMemberRepository;
-
-    @Mock
-    private UserRepository userRepository;
-
-    @Mock
-    private GroupMapper groupMapper;
-
-    @InjectMocks
-    private GroupService groupService;
-
+    private final Jwt ownerToken = Jwt.withTokenValue("owner-token").header("alg", "none").subject("auth0|owner").build();
+    private final User owner = user(1L);
+    private final User member = user(2L);
     private Group group;
-    private User user;
-    private GroupRequest groupRequest;
-    private GroupResponse groupResponse;
 
     @BeforeEach
     void setUp() {
         group = new Group();
-        group.setId(1L);
-        group.setGroupName("Trip to Goa");
-        group.setDescription("Vacation expenses");
-
-        user = new User();
-        user.setId(10L);
-        user.setUsername("akshay");
-        user.setEmail("akshay@example.com");
-
-        groupRequest = new GroupRequest("Trip to Goa", "Vacation expenses");
-        groupResponse = new GroupResponse(1L, "Trip to Goa", "Vacation expenses");
+        group.setId(10L);
+        group.setGroupName("Weekend trip");
+        group.setOwner(owner);
+        lenient().when(userService.requireCurrentUser(ownerToken)).thenReturn(owner);
     }
 
     @Test
-    void createGroup_Success() {
-        when(groupMapper.toEntity(groupRequest)).thenReturn(group);
-        when(groupRepository.save(group)).thenReturn(group);
-        when(groupMapper.toResponse(group)).thenReturn(groupResponse);
+    void createGroupAssignsOwnerAndCreatesMembership() {
+        GroupRequest request = new GroupRequest("Weekend trip", "", "USD");
+        when(groupMapper.toEntity(request)).thenReturn(group);
+        when(groupRepository.saveAndFlush(group)).thenReturn(group);
+        when(groupMapper.toResponse(group)).thenReturn(new GroupResponse(10L, "Weekend trip", "", 1L, false));
 
-        GroupResponse result = groupService.createGroup(groupRequest);
+        GroupResponse result = groupService.createGroup(request, ownerToken);
 
-        assertNotNull(result);
-        assertEquals(1L, result.getId());
-        assertEquals("Trip to Goa", result.getGroupName());
-        verify(groupRepository).save(group);
+        assertEquals(1L, result.getOwnerId());
+        assertEquals("USD", group.getCurrencyCode());
+        assertTrue(result.isViewerIsOwner());
+        verify(groupMemberRepository).save(argThat(m -> m.getId().equals(new GroupMemberId(10L, 1L))));
     }
 
     @Test
-    void getGroupById_Success() {
-        when(groupRepository.findById(1L)).thenReturn(Optional.of(group));
-        when(groupMapper.toResponse(group)).thenReturn(groupResponse);
+    void memberCannotReadGroupWithoutMembership() {
+        when(userService.requireCurrentUser(ownerToken)).thenReturn(member);
+        when(groupRepository.findById(10L)).thenReturn(Optional.of(group));
+        when(groupMemberRepository.existsById(new GroupMemberId(10L, 2L))).thenReturn(false);
 
-        GroupResponse result = groupService.getGroupById(1L);
-
-        assertNotNull(result);
-        assertEquals(1L, result.getId());
-        verify(groupRepository).findById(1L);
+        assertThrows(AccessDeniedException.class, () -> groupService.getGroupById(10L, ownerToken));
+        verifyNoInteractions(groupMapper);
     }
 
     @Test
-    void getGroupById_NotFound_ThrowsGroupNotFoundException() {
-        when(groupRepository.findById(99L)).thenReturn(Optional.empty());
+    void nonOwnerCannotUpdateGroup() {
+        when(userService.requireCurrentUser(ownerToken)).thenReturn(member);
+        when(groupRepository.findById(10L)).thenReturn(Optional.of(group));
 
-        assertThrows(GroupNotFoundException.class, () -> groupService.getGroupById(99L));
-    }
-
-    @Test
-    void updateGroupDetails_Success() {
-        GroupRequest updateRequest = new GroupRequest("Updated Goa Trip", "Updated Description");
-        Group updatedGroup = new Group();
-        updatedGroup.setId(1L);
-        updatedGroup.setGroupName("Updated Goa Trip");
-        updatedGroup.setDescription("Updated Description");
-        GroupResponse updatedResponse = new GroupResponse(1L, "Updated Goa Trip", "Updated Description");
-
-        when(groupRepository.findById(1L)).thenReturn(Optional.of(group));
-        when(groupRepository.save(any(Group.class))).thenReturn(updatedGroup);
-        when(groupMapper.toResponse(updatedGroup)).thenReturn(updatedResponse);
-
-        GroupResponse result = groupService.updateGroupDetails(1L, updateRequest);
-
-        assertNotNull(result);
-        assertEquals("Updated Goa Trip", result.getGroupName());
-        assertEquals("Updated Description", result.getDescription());
-        verify(groupRepository).save(group);
-    }
-
-    @Test
-    void updateGroupDetails_NotFound_ThrowsGroupNotFoundException() {
-        GroupRequest updateRequest = new GroupRequest("Updated", "Desc");
-        when(groupRepository.findById(99L)).thenReturn(Optional.empty());
-
-        assertThrows(GroupNotFoundException.class, () -> groupService.updateGroupDetails(99L, updateRequest));
+        assertThrows(AccessDeniedException.class, () -> groupService.updateGroupDetails(10L, new GroupRequest("Changed", ""), ownerToken));
         verify(groupRepository, never()).save(any());
     }
 
     @Test
-    void deleteGroup_Success() {
-        when(groupRepository.existsById(1L)).thenReturn(true);
+    void ownerCanAddMemberAndDuplicateIsRejected() {
+        AddMemberRequest request = new AddMemberRequest(2L);
+        GroupMembers saved = new GroupMembers();
+        saved.setJoinedAt(OffsetDateTime.now());
+        when(groupRepository.findById(10L)).thenReturn(Optional.of(group));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(member));
+        when(groupMemberRepository.existsById(new GroupMemberId(10L, 2L))).thenReturn(false, true);
+        when(groupMemberRepository.saveAndFlush(any())).thenReturn(saved);
 
-        groupService.deleteGroup(1L);
-
-        verify(groupRepository).deleteById(1L);
+        assertEquals(2L, groupService.addMemberToGroup(10L, request, ownerToken).getUserId());
+        assertThrows(DuplicateMembershipException.class, () -> groupService.addMemberToGroup(10L, request, ownerToken));
+        verify(groupMemberRepository, times(1)).saveAndFlush(any());
     }
 
     @Test
-    void deleteGroup_NotFound_ThrowsGroupNotFoundException() {
-        when(groupRepository.existsById(99L)).thenReturn(false);
+    void groupMembersIncludeUsernamesAndHideAnonymizedInactiveUsernames() {
+        User inactive = user(3L);
+        inactive.setUsername("archived_3_oldname");
+        inactive.setActive(false);
+        GroupMembers ownerMembership = membership(owner);
+        GroupMembers memberMembership = membership(member);
+        GroupMembers inactiveMembership = membership(inactive);
+        when(groupRepository.findById(10L)).thenReturn(Optional.of(group));
+        when(groupMemberRepository.existsById(new GroupMemberId(10L, 1L))).thenReturn(true);
+        when(groupMemberRepository.findByGroup_Id(10L)).thenReturn(List.of(ownerMembership, memberMembership, inactiveMembership));
 
-        assertThrows(GroupNotFoundException.class, () -> groupService.deleteGroup(99L));
-        verify(groupRepository, never()).deleteById(anyLong());
+        List<GroupMemberResponse> result = groupService.getGroupMembers(10L, ownerToken);
+
+        assertEquals("user1", result.get(0).getUsername());
+        assertTrue(result.get(0).isOwner());
+        assertEquals("user2", result.get(1).getUsername());
+        assertEquals("Former member", result.get(2).getUsername());
     }
 
     @Test
-    void getAllGroupForUser_Success() {
-        GroupMembers member = new GroupMembers();
-        member.setId(new GroupMemberId(1L, 10L));
-        member.setGroup(group);
-        member.setUser(user);
+    void ownerCanCreateSixDigitInviteCodeAndOnlyHashIsStored() {
+        when(groupRepository.findById(10L)).thenReturn(Optional.of(group));
+        when(groupRepository.existsByInviteCodeHash(any())).thenReturn(false);
+        when(groupRepository.save(group)).thenReturn(group);
 
-        when(userRepository.findById(10L)).thenReturn(Optional.of(user));
-        when(groupMemberRepository.findByUser_Id(10L)).thenReturn(List.of(member));
-        when(groupMapper.toResponse(group)).thenReturn(groupResponse);
+        GroupInviteCodeResponse result = groupService.createInviteCode(10L, ownerToken);
 
-        List<GroupResponse> result = groupService.getAllGroupForUser(10L);
-
-        assertEquals(1, result.size());
-        assertEquals(1L, result.getFirst().getId());
+        assertTrue(result.code().matches("[0-9]{6}"));
+        assertTrue(result.expiresAt().isAfter(OffsetDateTime.now().plusDays(6)));
+        assertNotEquals(result.code(), group.getInviteCodeHash());
+        assertEquals(64, group.getInviteCodeHash().length());
     }
 
     @Test
-    void getAllGroupForUser_UserNotFound_ThrowsAccountNotFoundException() {
-        when(userRepository.findById(99L)).thenReturn(Optional.empty());
+    void memberCanJoinWithValidCode() throws Exception {
+        String code = "123456";
+        Jwt memberToken = Jwt.withTokenValue("member-token").header("alg", "none").subject("auth0|member").build();
+        when(userService.requireCurrentUser(memberToken)).thenReturn(member);
+        group.setInviteCodeHash(hash(code));
+        group.setInviteExpiresAt(OffsetDateTime.now().plusDays(1));
+        when(groupRepository.findByInviteCodeHashAndInviteExpiresAtAfter(eq(hash(code)), any())).thenReturn(Optional.of(group));
+        when(groupMemberRepository.existsById(new GroupMemberId(10L, 2L))).thenReturn(false);
+        when(groupMapper.toResponse(group)).thenReturn(new GroupResponse(10L, "Weekend trip", "", 1L, false));
 
-        assertThrows(AccountNotFoundException.class, () -> groupService.getAllGroupForUser(99L));
+        GroupResponse result = groupService.joinGroupByCode(new JoinGroupByCodeRequest(code), memberToken);
+
+        assertEquals(10L, result.getId());
+        verify(groupMemberRepository).saveAndFlush(any(GroupMembers.class));
     }
 
     @Test
-    void getGroupMembers_Success() {
-        GroupMembers member = new GroupMembers();
-        member.setId(new GroupMemberId(1L, 10L));
-        member.setGroup(group);
-        member.setUser(user);
-        member.setJoinedAt(OffsetDateTime.now());
+    void invalidCodeRecordsAnAttempt() {
+        when(groupRepository.findByInviteCodeHashAndInviteExpiresAtAfter(any(), any())).thenReturn(Optional.empty());
+        when(groupJoinAttemptRepository.countByUser_IdAndAttemptedAtAfter(eq(1L), any())).thenReturn(0L);
 
-        when(groupRepository.existsById(1L)).thenReturn(true);
-        when(groupMemberRepository.findByGroup_Id(1L)).thenReturn(List.of(member));
-
-        List<GroupMemberResponse> members = groupService.getGroupMembers(1L);
-
-        assertEquals(1, members.size());
-        assertEquals(1L, members.getFirst().getGroupId());
-        assertEquals(10L, members.getFirst().getUserId());
+        assertThrows(InvalidGroupInviteCodeException.class,
+                () -> groupService.joinGroupByCode(new JoinGroupByCodeRequest("000000"), ownerToken));
+        verify(groupJoinAttemptRepository).save(any(GroupJoinAttempt.class));
     }
 
     @Test
-    void getGroupMembers_GroupNotFound_ThrowsGroupNotFoundException() {
-        when(groupRepository.existsById(99L)).thenReturn(false);
+    void ownerCannotRemoveMemberWithAnOutstandingBalance() {
+        when(groupRepository.findById(10L)).thenReturn(Optional.of(group));
+        when(groupMemberRepository.existsById(new GroupMemberId(10L, 2L))).thenReturn(true);
+        when(groupFinancialService.getBalances(10L, ownerToken)).thenReturn(new GroupBalanceResponse(
+                10L, 1L, "INR", List.of(new MemberBalanceResponse(2L, "user2", new java.math.BigDecimal("-2.00"))), List.of()));
 
-        assertThrows(GroupNotFoundException.class, () -> groupService.getGroupMembers(99L));
-    }
-
-    @Test
-    void addMemberToGroup_Success() {
-        AddMemberRequest request = new AddMemberRequest(10L);
-        GroupMembers member = new GroupMembers();
-        member.setId(new GroupMemberId(1L, 10L));
-        member.setGroup(group);
-        member.setUser(user);
-        OffsetDateTime now = OffsetDateTime.now();
-        member.setJoinedAt(now);
-
-        when(groupMemberRepository.existsById(new GroupMemberId(1L, 10L))).thenReturn(false);
-        when(groupRepository.findById(1L)).thenReturn(Optional.of(group));
-        when(userRepository.findById(10L)).thenReturn(Optional.of(user));
-        when(groupMemberRepository.save(any(GroupMembers.class))).thenReturn(member);
-
-        GroupMemberResponse response = groupService.addMemberToGroup(1L, request);
-
-        assertNotNull(response);
-        assertEquals(1L, response.getGroupId());
-        assertEquals(10L, response.getUserId());
-        assertEquals(now, response.getJoinedAt());
-    }
-
-    @Test
-    void addMemberToGroup_AlreadyMember_ThrowsDuplicateMembershipException() {
-        AddMemberRequest request = new AddMemberRequest(10L);
-        when(groupMemberRepository.existsById(new GroupMemberId(1L, 10L))).thenReturn(true);
-
-        assertThrows(DuplicateMembershipException.class, () -> groupService.addMemberToGroup(1L, request));
-        verify(groupMemberRepository, never()).save(any());
-    }
-
-    @Test
-    void addMemberToGroup_GroupNotFound_ThrowsGroupNotFoundException() {
-        AddMemberRequest request = new AddMemberRequest(10L);
-        when(groupMemberRepository.existsById(new GroupMemberId(99L, 10L))).thenReturn(false);
-        when(groupRepository.findById(99L)).thenReturn(Optional.empty());
-
-        assertThrows(GroupNotFoundException.class, () -> groupService.addMemberToGroup(99L, request));
-    }
-
-    @Test
-    void addMemberToGroup_UserNotFound_ThrowsAccountNotFoundException() {
-        AddMemberRequest request = new AddMemberRequest(99L);
-        when(groupMemberRepository.existsById(new GroupMemberId(1L, 99L))).thenReturn(false);
-        when(groupRepository.findById(1L)).thenReturn(Optional.of(group));
-        when(userRepository.findById(99L)).thenReturn(Optional.empty());
-
-        assertThrows(AccountNotFoundException.class, () -> groupService.addMemberToGroup(1L, request));
-    }
-
-    @Test
-    void removeMemberFromGroup_Success() {
-        when(groupRepository.existsById(1L)).thenReturn(true);
-        when(userRepository.existsById(10L)).thenReturn(true);
-        when(groupMemberRepository.existsById(new GroupMemberId(1L, 10L))).thenReturn(true);
-
-        groupService.removeMemberFromGroup(1L, 10L);
-
-        verify(groupMemberRepository).deleteById(new GroupMemberId(1L, 10L));
-    }
-
-    @Test
-    void removeMemberFromGroup_GroupNotFound_ThrowsGroupNotFoundException() {
-        when(groupRepository.existsById(99L)).thenReturn(false);
-
-        assertThrows(GroupNotFoundException.class, () -> groupService.removeMemberFromGroup(99L, 10L));
+        assertThrows(com.akshay.expense_splitter.exception.FinancialOperationException.class,
+                () -> groupService.removeMemberFromGroup(10L, 2L, ownerToken));
         verify(groupMemberRepository, never()).deleteById(any());
     }
 
-    @Test
-    void removeMemberFromGroup_UserNotFound_ThrowsAccountNotFoundException() {
-        when(groupRepository.existsById(1L)).thenReturn(true);
-        when(userRepository.existsById(99L)).thenReturn(false);
-
-        assertThrows(AccountNotFoundException.class, () -> groupService.removeMemberFromGroup(1L, 99L));
-        verify(groupMemberRepository, never()).deleteById(any());
+    private GroupMembers membership(User user) {
+        GroupMembers membership = new GroupMembers();
+        membership.setUser(user);
+        membership.setGroup(group);
+        membership.setJoinedAt(OffsetDateTime.now());
+        return membership;
     }
 
-    @Test
-    void removeMemberFromGroup_MemberNotFound_ThrowsMemberNotFoundException() {
-        when(groupRepository.existsById(1L)).thenReturn(true);
-        when(userRepository.existsById(10L)).thenReturn(true);
-        when(groupMemberRepository.existsById(new GroupMemberId(1L, 10L))).thenReturn(false);
+    private static String hash(String value) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
+    }
 
-        assertThrows(MemberNotFoundException.class, () -> groupService.removeMemberFromGroup(1L, 10L));
-        verify(groupMemberRepository, never()).deleteById(any());
+    private static User user(Long id) {
+        User user = new User();
+        user.setId(id);
+        user.setActive(true);
+        user.setUsername("user" + id);
+        user.setEmail("user" + id + "@example.com");
+        return user;
     }
 }

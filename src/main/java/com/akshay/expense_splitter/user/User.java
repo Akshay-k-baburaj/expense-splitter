@@ -20,6 +20,8 @@ public class User {
     private String username;
     @Column(unique = true, nullable = false,length = 255)
     private String email;
+    @Column(name = "auth0_subject", unique = true, length = 255)
+    private String auth0Subject;
     @Column(name = "is_active", nullable = false)
     private boolean isActive = true;
     @Column(name = "created_at", nullable = false, updatable = false)

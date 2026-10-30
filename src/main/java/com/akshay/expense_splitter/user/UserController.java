@@ -3,38 +3,41 @@ package com.akshay.expense_splitter.user;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/v1/users")
+@RequestMapping("/api/v1/users/me")
 public class UserController {
     private final UserService userService;
 
-    public UserController(UserService userService){
+    public UserController(UserService userService) {
         this.userService = userService;
     }
 
+    @GetMapping
+    public ResponseEntity<UserResponse> getCurrentUser(@AuthenticationPrincipal Jwt principal) {
+        return ResponseEntity.ok(userService.getCurrentUser(principal));
+    }
+
     @PostMapping
-    public ResponseEntity<UserResponse> createUserAccount(@Valid @RequestBody UserRequest userRequest){
-        UserResponse createdUser = userService.createUserAccount(userRequest);
-        return ResponseEntity.status(HttpStatus.CREATED).body(createdUser);
+    public ResponseEntity<UserResponse> createCurrentUser(
+            @AuthenticationPrincipal Jwt principal,
+            @Valid @RequestBody CreateUserProfileRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(userService.createCurrentUser(principal, request));
     }
 
-    @GetMapping("/{id}")
-    public ResponseEntity<UserResponse> getAccountById(@PathVariable Long id){
-        UserResponse userById = userService.getUserById(id);
-        return ResponseEntity.status(HttpStatus.OK).body(userById);
+    @PutMapping
+    public ResponseEntity<UserResponse> updateCurrentUser(
+            @AuthenticationPrincipal Jwt principal,
+            @Valid @RequestBody UpdateUserProfileRequest request) {
+        return ResponseEntity.ok(userService.updateCurrentUser(principal, request));
     }
 
-    @PutMapping("/{id}")
-    public ResponseEntity<UserResponse> updateAccountDetails(@PathVariable Long id, @Valid @RequestBody UserRequest userRequest){
-        UserResponse updatedUser = userService.updateAccountById(id,userRequest);
-        return ResponseEntity.status(HttpStatus.OK).body(updatedUser);
-    }
-
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deactivateAccount(@PathVariable Long id){
-        userService.deactivateAccount(id);
+    @DeleteMapping
+    public ResponseEntity<Void> deactivateCurrentUser(@AuthenticationPrincipal Jwt principal) {
+        userService.deactivateCurrentUser(principal);
         return ResponseEntity.noContent().build();
     }
 }

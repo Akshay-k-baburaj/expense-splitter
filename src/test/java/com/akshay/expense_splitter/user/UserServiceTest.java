@@ -1,127 +1,93 @@
 package com.akshay.expense_splitter.user;
 
-import com.akshay.expense_splitter.exception.AccountNotFoundException;
+import com.akshay.expense_splitter.exception.DuplicateUserException;
+import com.akshay.expense_splitter.exception.EmailVerificationRequiredException;
+import com.akshay.expense_splitter.exception.LegacyAccountLinkRequiredException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.oauth2.jwt.Jwt;
 
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class UserServiceTest {
-
-    @Mock
-    private UserRepository userRepository;
-
-    @Mock
-    private UserMapper userMapper;
-
-    @InjectMocks
+    private static final String EMAIL_CLAIM = "https://expense-splitter.example/claims/email";
+    private static final String VERIFIED_CLAIM = "https://expense-splitter.example/claims/email_verified";
+    @Mock UserRepository userRepository;
+    @Mock UserMapper userMapper;
     private UserService userService;
-
-    private User user;
-    private UserRequest userRequest;
-    private UserResponse userResponse;
+    private Jwt verifiedPrincipal;
 
     @BeforeEach
     void setUp() {
-        user = new User();
+        userService = new UserService(userRepository, userMapper, EMAIL_CLAIM, VERIFIED_CLAIM);
+        verifiedPrincipal = Jwt.withTokenValue("signed-token").header("alg", "none")
+                .subject("auth0|person").claim(EMAIL_CLAIM, "person@example.com")
+                .claim(VERIFIED_CLAIM, true).build();
+    }
+
+    @Test
+    void createsProfileUsingVerifiedTokenIdentity() {
+        CreateUserProfileRequest request = new CreateUserProfileRequest(" person ");
+        User saved = user("person", "person@example.com", "auth0|person");
+        when(userRepository.findByAuth0Subject("auth0|person")).thenReturn(Optional.empty());
+        when(userRepository.existsByEmail("person@example.com")).thenReturn(false);
+        when(userRepository.existsByUsername("person")).thenReturn(false);
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(saved);
+        when(userMapper.toResponse(saved)).thenReturn(new UserResponse(1L, "person", "person@example.com"));
+
+        UserResponse result = userService.createCurrentUser(verifiedPrincipal, request);
+
+        assertEquals(1L, result.getId());
+        verify(userRepository).saveAndFlush(argThat(user -> user.getUsername().equals("person")
+                && user.getAuth0Subject().equals("auth0|person")));
+    }
+
+    @Test
+    void rejectsUnverifiedEmail() {
+        Jwt unverified = Jwt.withTokenValue("signed-token").header("alg", "none")
+                .subject("auth0|person").claim(EMAIL_CLAIM, "person@example.com")
+                .claim(VERIFIED_CLAIM, false).build();
+        when(userRepository.findByAuth0Subject("auth0|person")).thenReturn(Optional.empty());
+
+        assertThrows(EmailVerificationRequiredException.class,
+                () -> userService.createCurrentUser(unverified, new CreateUserProfileRequest("person")));
+        verify(userRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void doesNotAutomaticallyLinkLegacyAccountByEmail() {
+        when(userRepository.findByAuth0Subject("auth0|person")).thenReturn(Optional.empty());
+        when(userRepository.existsByEmail("person@example.com")).thenReturn(true);
+
+        assertThrows(LegacyAccountLinkRequiredException.class,
+                () -> userService.createCurrentUser(verifiedPrincipal, new CreateUserProfileRequest("person")));
+        verify(userRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void rejectsDuplicateUsername() {
+        when(userRepository.findByAuth0Subject("auth0|person")).thenReturn(Optional.empty());
+        when(userRepository.existsByEmail("person@example.com")).thenReturn(false);
+        when(userRepository.existsByUsername("person")).thenReturn(true);
+
+        assertThrows(DuplicateUserException.class,
+                () -> userService.createCurrentUser(verifiedPrincipal, new CreateUserProfileRequest("person")));
+        verify(userRepository, never()).saveAndFlush(any());
+    }
+
+    private static User user(String username, String email, String subject) {
+        User user = new User();
         user.setId(1L);
-        user.setUsername("akshay");
-        user.setEmail("akshay@example.com");
-        user.setActive(true);
-
-        userRequest = new UserRequest("akshay", "akshay@example.com");
-        userResponse = new UserResponse("akshay", "akshay@example.com");
-    }
-
-    @Test
-    void createUserAccount_Success() {
-        when(userMapper.toEntity(userRequest)).thenReturn(user);
-        when(userRepository.save(user)).thenReturn(user);
-        when(userMapper.toResponse(user)).thenReturn(userResponse);
-
-        UserResponse result = userService.createUserAccount(userRequest);
-
-        assertNotNull(result);
-        assertEquals("akshay", result.getUsername());
-        assertEquals("akshay@example.com", result.getEmail());
-        verify(userRepository).save(user);
-    }
-
-    @Test
-    void getUserById_Success() {
-        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(userMapper.toResponse(user)).thenReturn(userResponse);
-
-        UserResponse result = userService.getUserById(1L);
-
-        assertNotNull(result);
-        assertEquals("akshay", result.getUsername());
-        verify(userRepository).findById(1L);
-    }
-
-    @Test
-    void getUserById_NotFound_ThrowsAccountNotFoundException() {
-        when(userRepository.findById(99L)).thenReturn(Optional.empty());
-
-        assertThrows(AccountNotFoundException.class, () -> userService.getUserById(99L));
-    }
-
-    @Test
-    void updateAccountById_Success() {
-        UserRequest updateRequest = new UserRequest("newname", "newname@example.com");
-        User updatedUser = new User();
-        updatedUser.setId(1L);
-        updatedUser.setUsername("newname");
-        updatedUser.setEmail("newname@example.com");
-        UserResponse updatedResponse = new UserResponse("newname", "newname@example.com");
-
-        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(userRepository.save(any(User.class))).thenReturn(updatedUser);
-        when(userMapper.toResponse(updatedUser)).thenReturn(updatedResponse);
-
-        UserResponse result = userService.updateAccountById(1L, updateRequest);
-
-        assertNotNull(result);
-        assertEquals("newname", result.getUsername());
-        assertEquals("newname@example.com", result.getEmail());
-        verify(userRepository).save(user);
-    }
-
-    @Test
-    void updateAccountById_NotFound_ThrowsAccountNotFoundException() {
-        UserRequest updateRequest = new UserRequest("newname", "newname@example.com");
-        when(userRepository.findById(99L)).thenReturn(Optional.empty());
-
-        assertThrows(AccountNotFoundException.class, () -> userService.updateAccountById(99L, updateRequest));
-        verify(userRepository, never()).save(any());
-    }
-
-    @Test
-    void deactivateAccount_Success() {
-        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-
-        userService.deactivateAccount(1L);
-
-        assertFalse(user.isActive());
-        assertEquals("archived_1_akshay", user.getUsername());
-        assertEquals("archived_1_akshay@example.com", user.getEmail());
-        verify(userRepository).save(user);
-    }
-
-    @Test
-    void deactivateAccount_NotFound_ThrowsAccountNotFoundException() {
-        when(userRepository.findById(99L)).thenReturn(Optional.empty());
-
-        assertThrows(AccountNotFoundException.class, () -> userService.deactivateAccount(99L));
-        verify(userRepository, never()).save(any());
+        user.setUsername(username);
+        user.setEmail(email);
+        user.setAuth0Subject(subject);
+        return user;
     }
 }
