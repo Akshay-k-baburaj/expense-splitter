@@ -1,0 +1,11 @@
+.git
+.idea
+.neon
+.env
+.env.*
+!.env.example
+target
+node_modules
+package.json
+package-lock.json
+neon.ts

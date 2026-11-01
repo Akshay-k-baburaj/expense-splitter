@@ -4,6 +4,10 @@ target/
 !**/src/main/**/target/
 !**/src/test/**/target/
 
+# Local environment variables (may contain database credentials)
+.env
+.env.local
+
 ### STS ###
 .apt_generated
 .classpath
@@ -32,6 +36,10 @@ build/
 ### VS Code ###
 .vscode/
 
+
 PROJECT_CONTEXT.md
 AGENTS.md
 SECURITY_SETUP.md
+.neon
+node_modules/
+.env.local

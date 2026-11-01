@@ -1,0 +1,49 @@
+name: Backend CI
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Build and test (Java 21)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: expense_splitter_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d expense_splitter_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: jdbc:postgresql://localhost:5432/expense_splitter_db
+      DATABASE_USERNAME: postgres
+      DATABASE_PASSWORD: postgres
+      AUTH0_ISSUER_URI: https://ci-example.us.auth0.com/
+      AUTH0_JWKS_URI: https://ci-example.us.auth0.com/.well-known/jwks.json
+      AUTH0_AUDIENCE: https://expense-splitter-api
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build and run tests
+        run: |
+          chmod +x mvnw
+          ./mvnw --batch-mode verify
